@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Uploaded files & storage
+uploads/*
+!uploads/.gitkeep
+
+# Build & Logs
+dist/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# System & IDE
+.DS_Store
+.vscode/
+.idea/

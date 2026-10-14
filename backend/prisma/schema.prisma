@@ -1,0 +1,239 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Profile {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  fullName      String?        @map("full_name")
+  avatarUrl     String?        @map("avatar_url")
+  password      String?
+  googleId      String?        @map("google_id")
+  role          Role           @default(USER)
+  plan          Plan           @default(FREE)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  documents     Document[]
+  chats         Chat[]
+  feedback      MessageFeedback[]
+  apiUsage      ApiUsage[]
+  refreshTokens RefreshToken[]
+
+  @@map("profiles")
+}
+
+enum Role {
+  USER
+  ADMIN
+  FACULTY
+  VERIFIER
+  STUDENT
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile   Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Document {
+  id                      String         @id @default(uuid())
+  userId                  String         @map("user_id")
+  title                   String
+  fileName                String         @map("file_name")
+  filePath                String         @map("file_path")
+  fileSize                Int            @map("file_size")
+  pageCount               Int?           @map("page_count")
+  status                  DocumentStatus @default(PROCESSING)
+  isScanned               Boolean        @default(false) @map("is_scanned")
+  ocrConfidence           Float?         @map("ocr_confidence")
+  tokenCount              Int?           @map("token_count")
+  mimeType                String?        @map("mime_type")
+  thumbnail               String?
+
+  // --- Document Intelligence & Classification ---
+  docType                 String?        @default("OTHER") @map("doc_type") // CERTIFICATE, QUESTION_PAPER, INVOICE, MARKSHEET, REPORT, FORM, OTHER
+  classificationConfidence Float?        @default(0.0) @map("classification_confidence")
+  summary                 String?
+  rawExtracted            Json?          @map("raw_extracted") // Full extracted entities with confidence & source quote references
+  missingFields           String?        @map("missing_fields") // JSON array string of detected missing or inconsistent fields
+  anomalyNotes            String?        @map("anomaly_notes")
+  anomalyScore            Float?         @default(0.0) @map("anomaly_score")
+
+  // --- Primary Root Filter Fields: Academic & Certificate ---
+  candidateName           String?        @map("candidate_name")
+  department              String?
+  enrollmentNo            String?        @map("enrollment_no")
+  academicYear            String?        @map("academic_year")
+  semester                String?
+  phoneNumber             String?        @map("phone_number")
+  email                   String?
+  issuingAuthority        String?        @map("issuing_authority")
+  serialNo                String?        @map("serial_no")
+  gradeScore              String?        @map("grade_score")
+  issueDate               String?        @map("issue_date")
+
+  // --- Primary Root Filter Fields: Question Paper ---
+  courseCode              String?        @map("course_code")
+  courseName              String?        @map("course_name")
+  examType                String?        @map("exam_type") // MAIN, BACK, RE_EXAM, REGULAR
+  durationHours           String?        @map("duration_hours")
+  maxMarks                String?        @map("max_marks")
+
+  // --- QR Code & Barcode Intelligence ---
+  hasQrCode               Boolean        @default(false) @map("has_qr_code")
+  qrCodeData              String?        @map("qr_code_data") // Decoded payload / URL / serial token
+  barcodeType             String?        @map("barcode_type") // QR_CODE, BARCODE, NONE
+  qrVerified              Boolean        @default(false) @map("qr_verified")
+
+  // --- Audit Trail & Verification ---
+  isVerified              Boolean        @default(false) @map("is_verified")
+  verifiedBy              String?        @map("verified_by")
+  verifiedAt              DateTime?      @map("verified_at")
+  tags                    String?
+
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+
+  profile                 Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks                  DocumentChunk[]
+  chatDocuments           ChatDocument[]
+
+  @@map("documents")
+}
+
+enum DocumentStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+model DocumentChunk {
+  id          String   @id @default(uuid())
+  documentId  String   @map("document_id")
+  content     String
+  chunkIndex  Int      @map("chunk_index")
+  pageNumber  Int?     @map("page_number")
+  tokenCount  Int?     @map("token_count")
+  embedding   String?  // stored as JSON string of float array
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_chunks")
+}
+
+model Chat {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String   @default("New Chat")
+  isPinned    Boolean  @default(false) @map("is_pinned")
+  folderId    String?  @map("folder_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  profile     Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    Message[]
+  chatDocuments ChatDocument[]
+
+  @@map("chats")
+}
+
+model ChatDocument {
+  chatId      String   @map("chat_id")
+  documentId  String   @map("document_id")
+  addedAt     DateTime @default(now()) @map("added_at")
+
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, documentId])
+  @@map("chat_documents")
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  chatId      String   @map("chat_id")
+  role        MessageRole
+  content     String
+  citations   String?  // JSON array of citation objects
+  tokens      Int?
+  model       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  feedback    MessageFeedback[]
+
+  @@map("messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model MessageFeedback {
+  id          String       @id @default(uuid())
+  messageId   String       @map("message_id")
+  userId      String       @map("user_id")
+  feedback    FeedbackType
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  profile     Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_feedback")
+}
+
+enum FeedbackType {
+  UP
+  DOWN
+}
+
+model ApiUsage {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  model       String
+  inputTokens Int      @default(0) @map("input_tokens")
+  outputTokens Int     @default(0) @map("output_tokens")
+  cost        Float?
+  action      String   // chat, summary, quiz, flashcard, translate, intelligence
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profile     Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_usage")
+}
+
+model Folder {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  color     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("folders")
+}
